@@ -8,6 +8,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import Profile from './pages/Profile';
 import Topbar from './components/Topbar';
 import PrivateRoute from './auth/PrivateRoute';
+import AdminContentEditor from "./pages/AdminContentEditor";
 
 export default function App() {
   return (
