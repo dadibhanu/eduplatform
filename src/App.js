@@ -9,6 +9,7 @@ import Profile from './pages/Profile';
 import Topbar from './components/Topbar';
 import PrivateRoute from './auth/PrivateRoute';
 import AdminContentEditor from "./pages/AdminContentEditor";
+import "bootstrap/dist/css/bootstrap.min.css";
 
 export default function App() {
   return (
