@@ -1,3 +1,4 @@
+// src/pages/TopicDetail.jsx
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import api from "../api";
@@ -7,6 +8,7 @@ import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import ContentEditor from "../components/ContentEditor";
 import "highlight.js/styles/github.css";
 import hljs from "highlight.js";
+import { FaBookOpen, FaEdit, FaListUl, FaPlus } from "react-icons/fa";
 
 const renderComponent = (block, idx) => {
   if (!block || typeof block !== "object") return null;
@@ -21,17 +23,12 @@ const renderComponent = (block, idx) => {
         />
       );
     case "heading":
-      return <h2 key={idx}>{block.text}</h2>;
+      return <h2 key={idx} className="fw-bold mt-4 mb-2">{block.text}</h2>;
     case "paragraph":
-      return (
-        <p
-          key={idx}
-          dangerouslySetInnerHTML={{ __html: block.text || block.content }}
-        />
-      );
+      return <p key={idx} className="mb-3">{block.text || block.content}</p>;
     case "code":
       return (
-        <pre key={idx}>
+        <pre key={idx} className="code-block">
           <code className={`language-${block.language || "plaintext"}`}>
             {block.code || block.text}
           </code>
@@ -57,54 +54,34 @@ const TopicDetail = () => {
   const [reorderMode, setReorderMode] = useState(false);
   const [savingOrder, setSavingOrder] = useState(false);
 
-  const [showSubtopicModal, setShowSubtopicModal] = useState(false);
-  const [newTopic, setNewTopic] = useState({
-    title: "",
-    slug: "",
-    description: "",
-    order_no: 0,
-  });
-
   const [showContentModal, setShowContentModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
-  // Fetch topic and content
+  const [showSubtopicModal, setShowSubtopicModal] = useState(false);
+  const [newTopic, setNewTopic] = useState({ title: "", slug: "", description: "", order_no: 0 });
+
+  // Fetch topic
   const fetchTopicData = useCallback(async () => {
     try {
       setLoading(true);
-      setError(null);
       const res = await api.get(`/topics/slug/${slugPath}/`);
       setData(res.data);
       setChildrenState(res.data.children || []);
-
-      if (Array.isArray(res.data.blocks)) {
-        const merged = res.data.blocks.flatMap((b) => b.components || []);
-        setComponents(merged);
-      } else {
-        setComponents(res.data.components || []);
-      }
+      setComponents(res.data.blocks?.flatMap((b) => b.components) || res.data.components || []);
     } catch (err) {
-      setError(
-        err.response?.status === 404
-          ? "Topic not found"
-          : "Failed to load topic data"
-      );
-      setData(null);
+      setError("Failed to load topic");
     } finally {
       setLoading(false);
     }
   }, [slugPath]);
 
-  useEffect(() => {
-    fetchTopicData();
-  }, [fetchTopicData]);
+  useEffect(() => { fetchTopicData(); }, [fetchTopicData]);
 
-  // Highlight code blocks
+  // Highlight code after render
   useEffect(() => {
     hljs.highlightAll();
   }, [components]);
 
-  // Handle drag and drop reorder
   const handleDragEnd = (result) => {
     if (!result.destination) return;
     const reordered = Array.from(childrenState);
@@ -113,357 +90,180 @@ const TopicDetail = () => {
     setChildrenState(reordered);
   };
 
-  const handleSaveOrder = async () => {
-    try {
-      setSavingOrder(true);
-      const body = childrenState.map((c, index) => ({
-        id: c.id,
-        order_no: index,
-      }));
-      await api.post(`/topics/${data.topic.id}/reorder`, body);
-      alert("✅ Reorder saved successfully!");
-      setReorderMode(false);
-      fetchTopicData();
-    } catch (err) {
-      alert(
-        "❌ Failed to save order: " +
-          (err.response?.data?.message || err.message)
-      );
-    } finally {
-      setSavingOrder(false);
-    }
-  };
-
-  // Add subtopic
-  const handleAddSubtopic = async (e) => {
-    e.preventDefault();
-    try {
-      const payload = { parent_id: data.topic.id, ...newTopic };
-      await api.post("/topics/add", payload);
-      alert("✅ Subtopic added!");
-      setShowSubtopicModal(false);
-      setNewTopic({ title: "", slug: "", description: "", order_no: 0 });
-      fetchTopicData();
-    } catch (err) {
-      alert(
-        "❌ Failed to add subtopic: " +
-          (err.response?.data?.message || err.message)
-      );
-    }
-  };
-
-  // Add/Edit content
-  const handleSaveContent = async (payload) => {
-    try {
-      await api.post(`/topics/slug/${slugPath}/content`, payload);
-      alert(isEditing ? "✅ Content updated!" : "✅ Content added!");
-      setShowContentModal(false);
-      setIsEditing(false);
-      fetchTopicData();
-    } catch (err) {
-      alert(
-        "❌ Failed to save content: " +
-          (err.response?.data?.message || err.message)
-      );
-    }
-  };
-
-  // Breadcrumbs
-  const generateBreadcrumbs = () => {
-    if (!slugPath) return [];
-    const parts = slugPath.split("/").filter(Boolean);
-    const crumbs = [{ name: "Home", path: "/" }];
-    let cur = "/topic";
-    parts.forEach((p, i) => {
-      cur += `/${p}`;
-      crumbs.push({
-        name: p.charAt(0).toUpperCase() + p.slice(1),
-        path: cur,
-        isLast: i === parts.length - 1,
-      });
-    });
-    return crumbs;
-  };
-
   if (loading) return <Loader />;
   if (error) return <div className="alert alert-danger">{error}</div>;
-  if (!data || !data.topic)
-    return <div className="alert alert-warning">No topic data available.</div>;
+  if (!data?.topic) return <div>No topic data</div>;
 
   const { topic } = data;
-  const breadcrumbs = generateBreadcrumbs();
   const hasSubtopics = childrenState.length > 0;
   const hasContent = components.length > 0;
 
   return (
-    <div className="container-fluid px-4 py-4">
-      {/* Breadcrumbs */}
-      {breadcrumbs.length > 1 && (
-        <nav aria-label="breadcrumb" className="mb-4">
-          <div className="bg-light p-3 rounded-3 shadow-sm d-flex align-items-center flex-wrap">
-            {breadcrumbs.map((crumb, i) => (
-              <span
-                key={i}
-                onClick={() => !crumb.isLast && navigate(crumb.path)}
-                className={`me-2 ${
-                  crumb.isLast ? "fw-bold text-dark" : "text-primary"
-                }`}
-                style={{ cursor: crumb.isLast ? "default" : "pointer" }}
-              >
-                {crumb.name}
-                {i < breadcrumbs.length - 1 && (
-                  <span className="mx-2 text-secondary"> &gt; </span>
-                )}
-              </span>
-            ))}
-          </div>
-        </nav>
-      )}
-
-      <div className="card border-0 shadow-sm mb-4">
-        <div className="card-header bg-white border-0 d-flex justify-content-between align-items-center">
-          <div>
-            <h1 className="h2 mb-1 text-primary fw-bold">{topic.title}</h1>
-            <p className="text-muted mb-0">{topic.description || ""}</p>
-          </div>
-
-          {isAdmin && (
-            <div className="d-flex gap-2">
-              <button
-                className="btn btn-sm btn-primary"
-                onClick={() => {
-                  setIsEditing(hasContent);
-                  setShowContentModal(true);
-                }}
-              >
-                {hasContent ? "✏️ Edit Content" : "➕ Add Content"}
-              </button>
-              <button
-                className="btn btn-sm btn-success"
-                onClick={() => setShowSubtopicModal(true)}
-              >
-                ➕ Add Subtopic
-              </button>
-            </div>
-          )}
-        </div>
-
-        <div className="card-body pt-4">
-          {/* Subtopics */}
-          {hasSubtopics && (
-            <section className="mb-5">
-              <div className="d-flex justify-content-between align-items-center mb-3">
-                <h3 className="h5 mb-0">Subtopics</h3>
-                {isAdmin && (
-                  <div className="d-flex gap-2">
-                    <button
-                      className={`btn btn-sm ${
-                        reorderMode ? "btn-warning" : "btn-secondary"
-                      }`}
-                      onClick={() => setReorderMode((prev) => !prev)}
-                    >
-                      {reorderMode ? "❌ Cancel Reorder" : "🔀 Reorder"}
-                    </button>
-                    {reorderMode && (
-                      <button
-                        className="btn btn-sm btn-success"
-                        onClick={handleSaveOrder}
-                        disabled={savingOrder}
-                      >
-                        {savingOrder ? "Saving..." : "💾 Save"}
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {reorderMode ? (
-                <DragDropContext onDragEnd={handleDragEnd}>
-                  <Droppable droppableId="subtopics" direction="vertical">
-                    {(provided) => (
-                      <div
-                        ref={provided.innerRef}
-                        {...provided.droppableProps}
-                        className="list-group"
-                      >
-                        {childrenState.map((ch, index) => (
-                          <Draggable
-                            key={ch.id}
-                            draggableId={String(ch.id)}
-                            index={index}
-                          >
-                            {(provided) => (
-                              <div
-                                ref={provided.innerRef}
-                                {...provided.draggableProps}
-                                {...provided.dragHandleProps}
-                                className="list-group-item mb-2"
-                                style={{
-                                  ...provided.draggableProps.style,
-                                  cursor: "grab",
-                                }}
-                              >
-                                <h5 className="mb-1 text-primary">{ch.title}</h5>
-                                <p className="text-muted small mb-0">
-                                  {ch.description || ""}
-                                </p>
-                              </div>
-                            )}
-                          </Draggable>
-                        ))}
-                        {provided.placeholder}
-                      </div>
-                    )}
-                  </Droppable>
-                </DragDropContext>
-              ) : (
-                <div className="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
-                  {childrenState.map((ch) => (
-                    <div key={ch.id} className="col">
-                      <div
-                        className="card h-100 border-0 shadow-sm"
-                        onClick={() => navigate(`/topic/${ch.full_path}`)}
-                        style={{ cursor: "pointer" }}
-                      >
-                        <div className="card-body">
-                          <h5 className="mb-1 text-primary">{ch.title}</h5>
-                          <p className="text-muted small mb-0">
-                            {ch.description || ""}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-          )}
-
-          {/* Content */}
-          {hasContent && (
-            <section>
-              <h3 className="h5 mb-3">Content</h3>
-              <div className="content">
-                {components.map((c, i) => renderComponent(c, i))}
-              </div>
-            </section>
-          )}
-        </div>
+    <div className="topic-detail container-fluid px-2 px-md-4 py-3">
+      {/* Title */}
+      <div className="mb-4 text-center text-md-start">
+        <h1 className="fw-bold">{topic.title}</h1>
+        <p className="text-muted">{topic.description}</p>
       </div>
 
-      {/* Content Editor Modal */}
+      {/* Admin actions */}
+      {isAdmin && (
+        <div className="d-flex flex-column flex-md-row gap-2 mb-4">
+          <button
+            className="btn btn-primary flex-fill"
+            onClick={() => { setIsEditing(hasContent); setShowContentModal(true); }}
+          >
+            {hasContent ? <FaEdit className="me-2" /> : <FaPlus className="me-2" />}
+            {hasContent ? "Edit Content" : "Add Content"}
+          </button>
+          <button
+            className="btn btn-success flex-fill"
+            onClick={() => setShowSubtopicModal(true)}
+          >
+            <FaPlus className="me-2" /> Add Subtopic
+          </button>
+          <button
+            className={`btn flex-fill ${reorderMode ? "btn-warning" : "btn-secondary"}`}
+            onClick={() => setReorderMode((p) => !p)}
+          >
+            <FaListUl className="me-2" />
+            {reorderMode ? "Cancel Reorder" : "Reorder Subtopics"}
+          </button>
+        </div>
+      )}
+
+      {/* Content */}
+      {hasContent && (
+        <section className="mb-5">
+          <h4 className="fw-bold mb-3"><FaBookOpen className="me-2" />Content</h4>
+          <div className="content-area">{components.map((c, i) => renderComponent(c, i))}</div>
+        </section>
+      )}
+
+      {/* Subtopics */}
+      {hasSubtopics && (
+        <section>
+          <h4 className="fw-bold mb-3">Subtopics</h4>
+          {reorderMode ? (
+            <DragDropContext onDragEnd={handleDragEnd}>
+              <Droppable droppableId="subtopics" direction="vertical">
+                {(provided) => (
+                  <div ref={provided.innerRef} {...provided.droppableProps}>
+                    {childrenState.map((ch, idx) => (
+                      <Draggable key={ch.id} draggableId={String(ch.id)} index={idx}>
+                        {(provided) => (
+                          <div
+                            ref={provided.innerRef}
+                            {...provided.draggableProps}
+                            {...provided.dragHandleProps}
+                            className="subtopic-card mb-3 p-3 bg-light rounded"
+                          >
+                            <h5>{ch.title}</h5>
+                            <p className="small text-muted">{ch.description}</p>
+                          </div>
+                        )}
+                      </Draggable>
+                    ))}
+                    {provided.placeholder}
+                  </div>
+                )}
+              </Droppable>
+            </DragDropContext>
+          ) : (
+            <div className="row g-3">
+              {childrenState.map((ch) => (
+                <div key={ch.id} className="col-12 col-md-6 col-lg-4">
+                  <div
+                    className="subtopic-card h-100 p-3 bg-white shadow-sm rounded"
+                    onClick={() => navigate(`/topic/${ch.full_path}`)}
+                    style={{ cursor: "pointer" }}
+                  >
+                    <h5 className="fw-bold">{ch.title}</h5>
+                    <p className="small text-muted">{ch.description}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Fullscreen Modals */}
       {showContentModal && (
-        <div className="modal show d-block" tabIndex="-1">
-          <div className="modal-dialog modal-xl">
+        <div className="modal fullscreen show d-block">
+          <div className="modal-dialog modal-fullscreen">
             <div className="modal-content">
-              <div className="modal-body">
-                <ContentEditor
-                  initialMetadata={data.topic.metadata || {}}
-                  initialHtml={
-                    components.find((c) => c.type === "richtext")?.html || ""
-                  }
-                  onSave={handleSaveContent}
-                  onCancel={() => setShowContentModal(false)}
-                />
-              </div>
+              <ContentEditor
+                initialMetadata={topic.metadata || {}}
+                initialHtml={components.find((c) => c.type === "richtext")?.html || ""}
+                onSave={(payload) => {
+                  api.post(`/topics/slug/${slugPath}/content`, payload).then(fetchTopicData);
+                  setShowContentModal(false);
+                }}
+                onCancel={() => setShowContentModal(false)}
+              />
             </div>
           </div>
         </div>
       )}
 
-      {/* Add Subtopic Modal */}
       {showSubtopicModal && (
-        <div className="modal show d-block" tabIndex="-1">
-          <div className="modal-dialog">
-            <div className="modal-content">
-              <form onSubmit={handleAddSubtopic}>
-                <div className="modal-header">
-                  <h5 className="modal-title">➕ Add Subtopic</h5>
-                  <button
-                    type="button"
-                    className="btn-close"
-                    onClick={() => setShowSubtopicModal(false)}
-                  ></button>
-                </div>
-                <div className="modal-body">
-                  <input
-                    type="text"
-                    className="form-control mb-2"
-                    placeholder="Title"
-                    value={newTopic.title}
-                    onChange={(e) =>
-                      setNewTopic((prev) => ({ ...prev, title: e.target.value }))
-                    }
-                    required
-                  />
-                  <input
-                    type="text"
-                    className="form-control mb-2"
-                    placeholder="Slug"
-                    value={newTopic.slug}
-                    onChange={(e) =>
-                      setNewTopic((prev) => ({ ...prev, slug: e.target.value }))
-                    }
-                    required
-                  />
-                  <textarea
-                    className="form-control mb-2"
-                    placeholder="Description"
-                    rows="3"
-                    value={newTopic.description}
-                    onChange={(e) =>
-                      setNewTopic((prev) => ({
-                        ...prev,
-                        description: e.target.value,
-                      }))
-                    }
-                  ></textarea>
-                  <input
-                    type="number"
-                    className="form-control"
-                    placeholder="Order Number"
-                    value={newTopic.order_no}
-                    onChange={(e) =>
-                      setNewTopic((prev) => ({
-                        ...prev,
-                        order_no: parseInt(e.target.value),
-                      }))
-                    }
-                  />
-                </div>
-                <div className="modal-footer">
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => setShowSubtopicModal(false)}
-                  >
-                    Cancel
-                  </button>
-                  <button type="submit" className="btn btn-success">
-                    Save
-                  </button>
-                </div>
-              </form>
+        <div className="modal fullscreen show d-block">
+          <div className="modal-dialog modal-fullscreen">
+            <div className="modal-content p-3">
+              <h5>Add Subtopic</h5>
+              <input className="form-control mb-2" placeholder="Title"
+                value={newTopic.title} onChange={(e) => setNewTopic({ ...newTopic, title: e.target.value })} />
+              <input className="form-control mb-2" placeholder="Slug"
+                value={newTopic.slug} onChange={(e) => setNewTopic({ ...newTopic, slug: e.target.value })} />
+              <textarea className="form-control mb-2" placeholder="Description"
+                value={newTopic.description} onChange={(e) => setNewTopic({ ...newTopic, description: e.target.value })}></textarea>
+              <button className="btn btn-success w-100"
+                onClick={async () => {
+                  await api.post("/topics/add", { parent_id: topic.id, ...newTopic });
+                  fetchTopicData();
+                  setShowSubtopicModal(false);
+                }}>
+                Save
+              </button>
+              <button className="btn btn-secondary w-100 mt-2" onClick={() => setShowSubtopicModal(false)}>Cancel</button>
             </div>
           </div>
         </div>
       )}
 
       <style>{`
-        .content pre {
+        .content-area pre,
+        .content-area .ql-syntax {
           background: #0b1220;
           color: #e6edf3;
           padding: 12px;
           border-radius: 6px;
           overflow-x: auto;
           margin-bottom: 1rem;
+          font-family: "JetBrains Mono", monospace;
+          font-size: 0.9rem;
         }
-        .content h1, .content h2, .content h3 {
+        .content-area h1, .content-area h2, .content-area h3 {
           margin-top: 1.25rem;
           margin-bottom: 0.75rem;
         }
-        .content p { margin-bottom: 0.875rem; }
-        .modal { background: rgba(0,0,0,0.5); }
+        .content-area p { margin-bottom: 0.875rem; }
+
+        .modal.fullscreen .modal-dialog {
+          margin: 0;
+          max-width: 100%;
+          height: 100%;
+        }
+        .modal.fullscreen .modal-content {
+          border-radius: 0;
+          height: 100%;
+        }
+
+        @media (max-width: 767px) {
+          .topic-detail h1 { font-size: 1.5rem; text-align: center; }
+          .btn { font-size: 1.1rem; width: 100%; }
+        }
       `}</style>
     </div>
   );
