@@ -3,6 +3,7 @@ import api from "../api";
 import TopicCard from "../components/TopicCard";
 import Loader from "../components/Loader";
 import { useAuth } from "../auth/AuthProvider";
+import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 
 const Home = () => {
   // Auth
@@ -21,9 +22,13 @@ const Home = () => {
     title: "",
     slug: "",
     order_no: 1,
-    description: ""
+    description: "",
   });
   const [submitting, setSubmitting] = useState(false);
+
+  // Reorder mode
+  const [reorderMode, setReorderMode] = useState(false);
+  const [savingOrder, setSavingOrder] = useState(false);
 
   // Fetch topics
   const fetchTopics = useCallback(async () => {
@@ -59,7 +64,7 @@ const Home = () => {
     const { name, value } = e.target;
     setFormData((prev) => ({
       ...prev,
-      [name]: name === "order_no" ? parseInt(value) : value
+      [name]: name === "order_no" ? parseInt(value) : value,
     }));
   };
 
@@ -76,7 +81,7 @@ const Home = () => {
         title: "",
         slug: "",
         order_no: 1,
-        description: ""
+        description: "",
       });
       fetchTopics();
     } catch (err) {
@@ -86,6 +91,37 @@ const Home = () => {
       );
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // Handle drag end
+  const handleDragEnd = (result) => {
+    if (!result.destination) return;
+    const reordered = Array.from(topics);
+    const [moved] = reordered.splice(result.source.index, 1);
+    reordered.splice(result.destination.index, 0, moved);
+    setTopics(reordered);
+  };
+
+  // Save order
+  const handleSaveOrder = async () => {
+    try {
+      setSavingOrder(true);
+      const body = topics.map((t, index) => ({
+        id: t.id,
+        order_no: index,
+      }));
+      await api.post("/topics/reorder", body);
+      alert("✅ Reorder saved successfully!");
+      setReorderMode(false);
+      fetchTopics();
+    } catch (err) {
+      alert(
+        "❌ Failed to save order: " +
+          (err.response?.data?.message || err.message)
+      );
+    } finally {
+      setSavingOrder(false);
     }
   };
 
@@ -105,15 +141,30 @@ const Home = () => {
 
   return (
     <div className="container-fluid px-4 py-4">
-      {/* Admin Add Topic Button */}
+      {/* Admin Buttons */}
       {isAdmin && (
-        <div className="mb-4">
+        <div className="mb-4 d-flex gap-2">
           <button
             className="btn btn-primary"
             onClick={() => setShowForm((prev) => !prev)}
           >
             {showForm ? "➖ Cancel" : "➕ Add Topic"}
           </button>
+          <button
+            className={`btn ${reorderMode ? "btn-warning" : "btn-secondary"}`}
+            onClick={() => setReorderMode((prev) => !prev)}
+          >
+            {reorderMode ? "❌ Cancel Reorder" : "🔀 Reorder Topics"}
+          </button>
+          {reorderMode && (
+            <button
+              className="btn btn-success"
+              onClick={handleSaveOrder}
+              disabled={savingOrder}
+            >
+              {savingOrder ? "Saving..." : "💾 Save Changes"}
+            </button>
+          )}
         </div>
       )}
 
@@ -187,14 +238,52 @@ const Home = () => {
         </div>
       )}
 
-      {/* Topic Grid */}
-      <div className="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 g-4">
-        {topics.map((topic) => (
-          <div key={topic.id} className="col">
-            <TopicCard t={topic} />
-          </div>
-        ))}
-      </div>
+      {/* Topic Grid or Reorder Mode */}
+      {reorderMode ? (
+        <DragDropContext onDragEnd={handleDragEnd}>
+          <Droppable droppableId="topics" direction="vertical">
+            {(provided) => (
+              <div
+                className="list-group"
+                {...provided.droppableProps}
+                ref={provided.innerRef}
+              >
+                {topics.map((topic, index) => (
+                  <Draggable
+                    key={topic.id}
+                    draggableId={String(topic.id)}
+                    index={index}
+                  >
+                    {(provided) => (
+                      <div
+                        className="list-group-item mb-2"
+                        ref={provided.innerRef}
+                        {...provided.draggableProps}
+                        {...provided.dragHandleProps}
+                        style={{
+                          ...provided.draggableProps.style,
+                          cursor: "grab",
+                        }}
+                      >
+                        <TopicCard t={topic} reorderMode />
+                      </div>
+                    )}
+                  </Draggable>
+                ))}
+                {provided.placeholder}
+              </div>
+            )}
+          </Droppable>
+        </DragDropContext>
+      ) : (
+        <div className="row row-cols-1 row-cols-sm-2 row-cols-md-3 row-cols-lg-4 g-4">
+          {topics.map((topic) => (
+            <div key={topic.id} className="col">
+              <TopicCard t={topic} />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
