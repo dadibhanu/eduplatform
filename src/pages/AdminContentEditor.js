@@ -10,6 +10,7 @@ export default function AdminXMLContentEditor({ topicPath }) {
   const [blocks, setBlocks] = useState([]);
   const [xmlPreview, setXmlPreview] = useState("");
   const [topic, setTopic] = useState(null);
+  const [uploading, setUploading] = useState(false);
 
   // 🟢 Fetch topic details
   useEffect(() => {
@@ -41,6 +42,64 @@ export default function AdminXMLContentEditor({ topicPath }) {
         b.id === id ? { ...b, fields: { ...b.fields, [key]: value } } : b
       )
     );
+  };
+
+  // 📤 Handle image upload to S3 API
+  const handleImageUpload = async (id, files) => {
+    if (!files?.length) return;
+    setUploading(true);
+
+    try {
+      const formData = new FormData();
+      formData.append("topic_id", topic?.id || "");
+      Array.from(files).forEach((file, i) => formData.append(`file${i}`, file));
+
+      const res = await fetch("http://31.97.202.194/api/upload/server", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+
+      const data = await res.json();
+      console.log("✅ Upload response:", data);
+
+      const urls = Array.isArray(data.files)
+        ? data.files.map((f) => f.url)
+        : [];
+
+      if (!urls.length) {
+        alert("⚠️ Upload succeeded but no URLs found in response!");
+        return;
+      }
+
+      // ✅ Update block fields with uploaded URLs
+      setBlocks((prev) =>
+        prev.map((b) => {
+          if (b.id === id) {
+            if (b.type === "image") {
+              return { ...b, fields: { ...b.fields, src: urls[0] } };
+            } else if (b.type === "carousel" || b.type === "gallery") {
+              return {
+                ...b,
+                fields: {
+                  ...b.fields,
+                  images: [...(b.fields.images || []), ...urls],
+                },
+              };
+            }
+          }
+          return b;
+        })
+      );
+
+      alert("✅ Image uploaded and added to content!");
+      generateXML(); // refresh preview
+    } catch (err) {
+      console.error("❌ Upload failed:", err);
+      alert("Upload failed: " + err.message);
+    } finally {
+      setUploading(false);
+    }
   };
 
   // 🧠 Generate XML
@@ -92,7 +151,7 @@ export default function AdminXMLContentEditor({ topicPath }) {
     return xml;
   };
 
-  // 💾 Save XML as JSON Payload
+  // 💾 Save XML to API
   const saveToServer = async () => {
     if (!topic) {
       alert("⚠️ Topic not loaded yet");
@@ -101,7 +160,6 @@ export default function AdminXMLContentEditor({ topicPath }) {
 
     const xml = generateXML();
 
-    // ✅ Proper JSON body
     const payload = {
       block_type: "page",
       block_order: 0,
@@ -112,7 +170,12 @@ export default function AdminXMLContentEditor({ topicPath }) {
           .filter(Boolean),
         estimated_read_time: readTime,
       },
-      components: xml, // ✅ Wrap XML as a value
+      components: [
+        {
+          type: "xml_block",
+          xml,
+        },
+      ],
     };
 
     try {
@@ -145,7 +208,7 @@ export default function AdminXMLContentEditor({ topicPath }) {
 
   return (
     <div className="container my-4">
-      <h3>🧱 XML Editor for Topic</h3>
+      <h3>🧱 XML Content Editor</h3>
       {topic && (
         <div className="alert alert-info">
           Editing: <b>{topic.title}</b> ({topic.full_path})
@@ -188,7 +251,7 @@ export default function AdminXMLContentEditor({ topicPath }) {
             <option value="gallery">Gallery</option>
           </select>
 
-          {/* Render block-specific fields */}
+          {/* Block-specific fields */}
           {b.type === "heading" && (
             <>
               <input
@@ -219,9 +282,7 @@ export default function AdminXMLContentEditor({ topicPath }) {
               <input
                 className="form-control mb-2"
                 placeholder="Language (e.g. python)"
-                onChange={(e) =>
-                  updateField(b.id, "language", e.target.value)
-                }
+                onChange={(e) => updateField(b.id, "language", e.target.value)}
               />
               <textarea
                 className="form-control"
@@ -231,13 +292,118 @@ export default function AdminXMLContentEditor({ topicPath }) {
               />
             </>
           )}
+
+          {b.type === "note" && (
+            <textarea
+              className="form-control"
+              rows="2"
+              placeholder="Note content"
+              onChange={(e) => updateField(b.id, "content", e.target.value)}
+            />
+          )}
+
+          {b.type === "example" && (
+            <>
+              <input
+                className="form-control mb-2"
+                placeholder="Example title"
+                onChange={(e) => updateField(b.id, "title", e.target.value)}
+              />
+              <textarea
+                className="form-control"
+                rows="3"
+                placeholder="Example text"
+                onChange={(e) => updateField(b.id, "content", e.target.value)}
+              />
+            </>
+          )}
+
+          {b.type === "image" && (
+            <>
+              <input
+                type="file"
+                accept="image/*"
+                className="form-control mb-2"
+                onChange={(e) => handleImageUpload(b.id, e.target.files)}
+              />
+              {b.fields.src && (
+                <img
+                  src={b.fields.src}
+                  alt="preview"
+                  className="img-fluid rounded shadow-sm mb-2"
+                  style={{ maxWidth: "250px" }}
+                />
+              )}
+              <input
+                className="form-control"
+                placeholder="Alt text"
+                onChange={(e) => updateField(b.id, "alt", e.target.value)}
+              />
+            </>
+          )}
+
+          {b.type === "carousel" && (
+            <>
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                className="form-control mb-2"
+                onChange={(e) => handleImageUpload(b.id, e.target.files)}
+              />
+              <input
+                className="form-control mb-2"
+                placeholder="Carousel caption"
+                onChange={(e) => updateField(b.id, "caption", e.target.value)}
+              />
+              <div className="d-flex flex-wrap gap-2 mt-2">
+                {(b.fields.images || []).map((url, idx) => (
+                  <img
+                    key={idx}
+                    src={url}
+                    alt=""
+                    className="rounded shadow-sm"
+                    style={{ width: "120px", height: "80px", objectFit: "cover" }}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+
+          {b.type === "gallery" && (
+            <>
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                className="form-control mb-2"
+                onChange={(e) => handleImageUpload(b.id, e.target.files)}
+              />
+              <input
+                className="form-control mb-2"
+                placeholder="Gallery caption"
+                onChange={(e) => updateField(b.id, "caption", e.target.value)}
+              />
+              <div className="row g-2 mt-2">
+                {(b.fields.images || []).map((url, idx) => (
+                  <div key={idx} className="col-6 col-md-4">
+                    <img
+                      src={url}
+                      alt=""
+                      className="img-fluid rounded shadow-sm"
+                    />
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       ))}
 
-      <button className="btn btn-primary me-2" onClick={addBlock}>
+      <button className="btn btn-primary me-2" onClick={addBlock} disabled={uploading}>
         ➕ Add Block
       </button>
-      <button className="btn btn-success" onClick={saveToServer}>
+      <button className="btn btn-success" onClick={saveToServer} disabled={uploading}>
         💾 Save XML (JSON Format)
       </button>
 
