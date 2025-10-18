@@ -1,8 +1,8 @@
 import React, { useState, useRef } from "react";
-import ReactQuill, { Quill } from "react-quill";
+import ReactQuill from "react-quill";
 import "react-quill/dist/quill.snow.css";
 
-// ------------------ 🔧 Custom XML Snippet Templates ------------------
+// ------------------ 🔧 Custom XML Templates ------------------
 const xmlTemplates = {
   heading: `<heading level="1">Your Heading Here</heading>\n`,
   paragraph: `<paragraph>Your paragraph content here...</paragraph>\n`,
@@ -12,15 +12,14 @@ const xmlTemplates = {
   gallery: `<gallery caption="Gallery Title">\n  <img>gallery1.png</img>\n  <img>gallery2.png</img>\n</gallery>\n`,
   example: `<example title="Example Title">\n  Example explanation text here.\n</example>\n`,
   note: `<note>Important note or tip goes here.</note>\n`,
-  codeCollection: `<code-collection title="Loops in Different Languages">\n  <snippet language="python"><![CDATA[\nfor i in range(5): print(i)\n]]></snippet>\n  <snippet language="java"><![CDATA[\nfor(int i=0; i<5; i++) System.out.println(i);\n]]></snippet>\n</code-collection>\n`
+  codeCollection: `<code-collection title="Loops in Different Languages">\n  <snippet language="python"><![CDATA[\nfor i in range(5): print(i)\n]]></snippet>\n  <snippet language="java"><![CDATA[\nfor(int i=0; i<5; i++) System.out.println(i);\n]]></snippet>\n</code-collection>\n`,
 };
 
-// ------------------ 📤 Image Upload Handler ------------------
+// ------------------ 🖼 Image Upload Handler ------------------
 const imageHandler = function () {
   const input = document.createElement("input");
   input.setAttribute("type", "file");
   input.setAttribute("accept", "image/*");
-  input.setAttribute("multiple", true);
   input.click();
 
   input.onchange = async () => {
@@ -29,25 +28,52 @@ const imageHandler = function () {
 
     for (let file of files) {
       const formData = new FormData();
-      formData.append("file", file);
+      formData.append("file0", file);
+
+      console.group(`🖼 Uploading: ${file.name}`);
 
       try {
         const res = await fetch("http://31.97.202.194/api/upload/server", {
           method: "POST",
-          body: formData,
           headers: {
             Authorization: `Bearer ${localStorage.getItem("token")}`,
           },
+          body: formData,
         });
 
-        const data = await res.json();
-        if (data.url) {
-          const range = quill.getSelection();
-          quill.insertEmbed(range.index, "image", data.url);
-          quill.setSelection(range.index + 1);
-        } else alert("❌ Upload failed");
+        const rawText = await res.text();
+        console.log("📄 Raw Response:", rawText);
+
+        let data;
+        try {
+          data = JSON.parse(rawText);
+        } catch (err) {
+          console.error("❌ JSON Parse Error:", err);
+          alert("❌ Upload failed: Invalid JSON response.");
+          continue;
+        }
+
+        const urls = (data.files || []).map((f) => f.url);
+        if (!urls.length) {
+          alert("⚠️ Upload succeeded but no URL found in response.");
+          continue;
+        }
+
+        // ✅ Insert real XML tag (not escaped)
+        const editor = quill;
+        const range = editor.getSelection(true);
+        const xmlTag = `<image alt="Image description">${urls[0]}</image>\n`;
+
+        editor.insertText(range.index, xmlTag, "user");
+        editor.setSelection(range.index + xmlTag.length);
+
+        console.log("🧩 Inserted XML tag:", xmlTag);
+        alert("✅ Image uploaded & XML tag inserted!");
       } catch (err) {
-        console.error("Upload error:", err);
+        console.error("❌ Upload Error:", err);
+        alert("❌ Upload failed: " + err.message);
+      } finally {
+        console.groupEnd();
       }
     }
   };
@@ -87,10 +113,10 @@ const formats = [
 // ------------------ 🧩 Main Component ------------------
 export default function ContentEditorXML({ onSave }) {
   const [content, setContent] = useState("");
-  const [showXML, setShowXML] = useState(false);
+  const [showXML, setShowXML] = useState(true);
   const quillRef = useRef(null);
 
-  // Insert XML snippet at current cursor
+  // Insert XML snippet
   const insertSnippet = (snippet) => {
     const editor = quillRef.current.getEditor();
     const range = editor.getSelection(true);
@@ -98,35 +124,37 @@ export default function ContentEditorXML({ onSave }) {
     editor.setSelection(range.index + snippet.length);
   };
 
-  // Convert content to XML (wrap as <section><![CDATA[]]></section>)
+  // Convert to full XML
   const convertToXML = (html) => {
     return `<?xml version="1.0" encoding="UTF-8"?>\n<content>\n  <section><![CDATA[\n${html.trim()}\n  ]]></section>\n</content>`;
   };
 
+  // Save button
   const handleSave = () => {
     const xml = convertToXML(content);
+    console.log("📦 Final XML Output:\n", xml);
     onSave?.(xml);
     alert("✅ XML content saved!");
   };
 
   return (
     <div className="container my-4">
-      <h3>🧠 Content Editor (Quill + XML Snippets)</h3>
+      <h3>🧠 XML Content Editor (Direct XML Tag Insertion)</h3>
 
       {/* Toolbar Buttons */}
       <div className="mb-3 d-flex flex-wrap gap-2">
-        <button className="btn btn-outline-primary btn-sm" onClick={() => insertSnippet(xmlTemplates.heading)}>🏷 Heading</button>
-        <button className="btn btn-outline-primary btn-sm" onClick={() => insertSnippet(xmlTemplates.paragraph)}>📝 Paragraph</button>
-        <button className="btn btn-outline-primary btn-sm" onClick={() => insertSnippet(xmlTemplates.code)}>💻 Code</button>
-        <button className="btn btn-outline-primary btn-sm" onClick={() => insertSnippet(xmlTemplates.image)}>🖼 Image</button>
-        <button className="btn btn-outline-primary btn-sm" onClick={() => insertSnippet(xmlTemplates.carousel)}>🎠 Carousel</button>
-        <button className="btn btn-outline-primary btn-sm" onClick={() => insertSnippet(xmlTemplates.gallery)}>🖼 Gallery</button>
-        <button className="btn btn-outline-primary btn-sm" onClick={() => insertSnippet(xmlTemplates.example)}>📚 Example</button>
-        <button className="btn btn-outline-primary btn-sm" onClick={() => insertSnippet(xmlTemplates.note)}>💡 Note</button>
-        <button className="btn btn-outline-primary btn-sm" onClick={() => insertSnippet(xmlTemplates.codeCollection)}>🧩 Code Collection</button>
+        {Object.entries(xmlTemplates).map(([key, value]) => (
+          <button
+            key={key}
+            className="btn btn-outline-primary btn-sm"
+            onClick={() => insertSnippet(value)}
+          >
+            ➕ {key}
+          </button>
+        ))}
       </div>
 
-      {/* Quill Editor + Preview */}
+      {/* Controls */}
       <div className="mb-3">
         <button
           className="btn btn-secondary me-2"
@@ -135,10 +163,11 @@ export default function ContentEditorXML({ onSave }) {
           {showXML ? "Hide XML" : "Show XML"}
         </button>
         <button className="btn btn-success" onClick={handleSave}>
-          💾 Save as XML
+          💾 Save XML
         </button>
       </div>
 
+      {/* Editor + XML Preview */}
       <div className="row">
         <div className={showXML ? "col-md-7" : "col-md-12"}>
           <ReactQuill

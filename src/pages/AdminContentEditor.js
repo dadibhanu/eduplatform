@@ -1,18 +1,17 @@
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import api from "../api";
+import RenderXMLContent from "../components/RenderXMLContent"; // 🟢 Import Renderer
 
-export default function AdminXMLContentEditor({ topicPath }) {
+export default function AdminContentEditor({ topicPath }) {
   const { token } = useAuth();
-
   const [tags, setTags] = useState("");
   const [readTime, setReadTime] = useState("");
   const [blocks, setBlocks] = useState([]);
   const [xmlPreview, setXmlPreview] = useState("");
   const [topic, setTopic] = useState(null);
-  const [uploading, setUploading] = useState(false);
 
-  // 🟢 Fetch topic details
+  // 🟢 Fetch topic info
   useEffect(() => {
     if (!topicPath) return;
     (async () => {
@@ -25,90 +24,53 @@ export default function AdminXMLContentEditor({ topicPath }) {
     })();
   }, [topicPath]);
 
-  // ➕ Add new block
-  const addBlock = () => {
+  // ➕ Add block
+  const addBlock = () =>
     setBlocks([...blocks, { id: Date.now(), type: "", fields: {} }]);
-  };
 
-  // 🔄 Change block type
-  const updateBlockType = (id, type) => {
+  // 🔁 Change block type
+  const updateBlockType = (id, type) =>
     setBlocks(blocks.map((b) => (b.id === id ? { ...b, type, fields: {} } : b)));
-  };
 
   // ✏️ Update field
-  const updateField = (id, key, value) => {
-    setBlocks(
-      blocks.map((b) =>
+  const updateField = (id, key, value) =>
+    setBlocks((prev) =>
+      prev.map((b) =>
         b.id === id ? { ...b, fields: { ...b.fields, [key]: value } } : b
       )
     );
-  };
 
-  // 📤 Handle image upload to S3 API
-  const handleImageUpload = async (id, files) => {
-    if (!files?.length) return;
-    setUploading(true);
+  // ➕ Add carousel image
+  const addCarouselImage = (id) =>
+    setBlocks((prev) =>
+      prev.map((b) => {
+        if (b.id === id) {
+          const images = [...(b.fields.images || []), ""];
+          return { ...b, fields: { ...b.fields, images } };
+        }
+        return b;
+      })
+    );
 
-    try {
-      const formData = new FormData();
-      formData.append("topic_id", topic?.id || "");
-      Array.from(files).forEach((file, i) => formData.append(`file${i}`, file));
-
-      const res = await fetch("http://31.97.202.194/api/upload/server", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData,
-      });
-
-      const data = await res.json();
-      console.log("✅ Upload response:", data);
-
-      const urls = Array.isArray(data.files)
-        ? data.files.map((f) => f.url)
-        : [];
-
-      if (!urls.length) {
-        alert("⚠️ Upload succeeded but no URLs found in response!");
-        return;
-      }
-
-      // ✅ Update block fields with uploaded URLs
-      setBlocks((prev) =>
-        prev.map((b) => {
-          if (b.id === id) {
-            if (b.type === "image") {
-              return { ...b, fields: { ...b.fields, src: urls[0] } };
-            } else if (b.type === "carousel" || b.type === "gallery") {
-              return {
-                ...b,
-                fields: {
-                  ...b.fields,
-                  images: [...(b.fields.images || []), ...urls],
-                },
-              };
-            }
-          }
-          return b;
-        })
-      );
-
-      alert("✅ Image uploaded and added to content!");
-      generateXML(); // refresh preview
-    } catch (err) {
-      console.error("❌ Upload failed:", err);
-      alert("Upload failed: " + err.message);
-    } finally {
-      setUploading(false);
-    }
-  };
+  // ➕ Add snippet
+  const addSnippet = (id) =>
+    setBlocks((prev) =>
+      prev.map((b) => {
+        if (b.id === id) {
+          const snippets = [
+            ...(b.fields.snippets || []),
+            { language: "", code: "" },
+          ];
+          return { ...b, fields: { ...b.fields, snippets } };
+        }
+        return b;
+      })
+    );
 
   // 🧠 Generate XML
   const generateXML = () => {
     let xml = `<?xml version="1.0" encoding="UTF-8"?>\n<content>\n`;
-    xml += `  <metadata>\n`;
-    xml += `    <tags>${tags}</tags>\n`;
-    xml += `    <readTime>${readTime}</readTime>\n`;
-    xml += `  </metadata>\n`;
+    xml += `  <metadata>\n    <tags>${tags}</tags>\n    <readTime>${readTime}</readTime>\n  </metadata>\n`;
 
     blocks.forEach((b) => {
       const f = b.fields;
@@ -120,10 +82,7 @@ export default function AdminXMLContentEditor({ topicPath }) {
           xml += `  <paragraph>${f.text || ""}</paragraph>\n`;
           break;
         case "code":
-          xml += `  <code language="${f.language || "text"}"><![CDATA[${f.code || ""}]]></code>\n`;
-          break;
-        case "note":
-          xml += `  <note>${f.content || ""}</note>\n`;
+          xml += `  <code language="${f.language || "plaintext"}"><![CDATA[${f.code || ""}]]></code>\n`;
           break;
         case "example":
           xml += `  <example title="${f.title || ""}">${f.content || ""}</example>\n`;
@@ -133,13 +92,19 @@ export default function AdminXMLContentEditor({ topicPath }) {
           break;
         case "carousel":
           xml += `  <carousel caption="${f.caption || ""}">\n`;
-          (f.images || []).forEach((img) => (xml += `    <img>${img}</img>\n`));
+          (f.images || []).forEach(
+            (img) =>
+              (xml += `    <image alt="${f.alt || ""}">${img}</image>\n`)
+          );
           xml += `  </carousel>\n`;
           break;
-        case "gallery":
-          xml += `  <gallery caption="${f.caption || ""}">\n`;
-          (f.images || []).forEach((img) => (xml += `    <img>${img}</img>\n`));
-          xml += `  </gallery>\n`;
+        case "code-collection":
+          xml += `  <code-collection title="${f.title || "Code Collection"}">\n`;
+          (f.snippets || []).forEach(
+            (s) =>
+              (xml += `    <snippet language="${s.language || "plaintext"}"><![CDATA[${s.code || ""}]]></snippet>\n`)
+          );
+          xml += `  </code-collection>\n`;
           break;
         default:
           break;
@@ -151,31 +116,19 @@ export default function AdminXMLContentEditor({ topicPath }) {
     return xml;
   };
 
-  // 💾 Save XML to API
+  // 💾 Save to server
   const saveToServer = async () => {
-    if (!topic) {
-      alert("⚠️ Topic not loaded yet");
-      return;
-    }
-
+    if (!topic) return alert("⚠️ Topic not loaded yet.");
     const xml = generateXML();
 
     const payload = {
       block_type: "page",
       block_order: 0,
       metadata: {
-        tags: tags
-          .split(",")
-          .map((t) => t.trim())
-          .filter(Boolean),
+        tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
         estimated_read_time: readTime,
       },
-      components: [
-        {
-          type: "xml_block",
-          xml,
-        },
-      ],
+      components: [{ type: "xml_block", xml }],
     };
 
     try {
@@ -185,30 +138,25 @@ export default function AdminXMLContentEditor({ topicPath }) {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Accept: "application/json",
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify(payload),
         }
       );
-
       const data = await res.json();
-      if (res.ok) {
-        alert("✅ XML saved successfully!");
-        console.log("Saved:", data);
-      } else {
-        console.error("❌ Error:", data);
-        alert("⚠️ Failed: " + JSON.stringify(data));
-      }
+      console.log("💾 Save Response:", data);
+      if (res.ok) alert("✅ XML saved successfully!");
+      else alert("⚠️ Save failed, check console logs.");
     } catch (err) {
-      console.error("❌ Upload failed:", err);
-      alert("Upload failed: " + err.message);
+      console.error("❌ Save failed:", err);
+      alert("❌ Save failed: " + err.message);
     }
   };
 
   return (
     <div className="container my-4">
-      <h3>🧱 XML Content Editor</h3>
+      <h3>🧱 XML Content Editor + Renderer</h3>
+
       {topic && (
         <div className="alert alert-info">
           Editing: <b>{topic.title}</b> ({topic.full_path})
@@ -234,7 +182,7 @@ export default function AdminXMLContentEditor({ topicPath }) {
 
       {/* Blocks */}
       {blocks.map((b) => (
-        <div key={b.id} className="card p-3 mb-3">
+        <div key={b.id} className="card p-3 mb-3 shadow-sm border-0">
           <select
             className="form-select mb-2"
             value={b.type}
@@ -244,14 +192,12 @@ export default function AdminXMLContentEditor({ topicPath }) {
             <option value="heading">Heading</option>
             <option value="paragraph">Paragraph</option>
             <option value="code">Code</option>
-            <option value="note">Note</option>
             <option value="example">Example</option>
             <option value="image">Image</option>
             <option value="carousel">Carousel</option>
-            <option value="gallery">Gallery</option>
+            <option value="code-collection">Code Collection</option>
           </select>
 
-          {/* Block-specific fields */}
           {b.type === "heading" && (
             <>
               <input
@@ -293,15 +239,6 @@ export default function AdminXMLContentEditor({ topicPath }) {
             </>
           )}
 
-          {b.type === "note" && (
-            <textarea
-              className="form-control"
-              rows="2"
-              placeholder="Note content"
-              onChange={(e) => updateField(b.id, "content", e.target.value)}
-            />
-          )}
-
           {b.type === "example" && (
             <>
               <input
@@ -312,7 +249,7 @@ export default function AdminXMLContentEditor({ topicPath }) {
               <textarea
                 className="form-control"
                 rows="3"
-                placeholder="Example text"
+                placeholder="Example content"
                 onChange={(e) => updateField(b.id, "content", e.target.value)}
               />
             </>
@@ -321,19 +258,10 @@ export default function AdminXMLContentEditor({ topicPath }) {
           {b.type === "image" && (
             <>
               <input
-                type="file"
-                accept="image/*"
                 className="form-control mb-2"
-                onChange={(e) => handleImageUpload(b.id, e.target.files)}
+                placeholder="Image URL"
+                onChange={(e) => updateField(b.id, "src", e.target.value)}
               />
-              {b.fields.src && (
-                <img
-                  src={b.fields.src}
-                  alt="preview"
-                  className="img-fluid rounded shadow-sm mb-2"
-                  style={{ maxWidth: "250px" }}
-                />
-              )}
               <input
                 className="form-control"
                 placeholder="Alt text"
@@ -345,72 +273,89 @@ export default function AdminXMLContentEditor({ topicPath }) {
           {b.type === "carousel" && (
             <>
               <input
-                type="file"
-                accept="image/*"
-                multiple
-                className="form-control mb-2"
-                onChange={(e) => handleImageUpload(b.id, e.target.files)}
-              />
-              <input
                 className="form-control mb-2"
                 placeholder="Carousel caption"
                 onChange={(e) => updateField(b.id, "caption", e.target.value)}
               />
-              <div className="d-flex flex-wrap gap-2 mt-2">
-                {(b.fields.images || []).map((url, idx) => (
-                  <img
-                    key={idx}
-                    src={url}
-                    alt=""
-                    className="rounded shadow-sm"
-                    style={{ width: "120px", height: "80px", objectFit: "cover" }}
-                  />
-                ))}
-              </div>
+              {(b.fields.images || []).map((img, i) => (
+                <input
+                  key={i}
+                  className="form-control mb-2"
+                  placeholder={`Image URL ${i + 1}`}
+                  value={img}
+                  onChange={(e) => {
+                    const updatedImgs = [...(b.fields.images || [])];
+                    updatedImgs[i] = e.target.value;
+                    updateField(b.id, "images", updatedImgs);
+                  }}
+                />
+              ))}
+              <button
+                className="btn btn-outline-primary btn-sm"
+                onClick={() => addCarouselImage(b.id)}
+              >
+                ➕ Add Image
+              </button>
             </>
           )}
 
-          {b.type === "gallery" && (
+          {b.type === "code-collection" && (
             <>
               <input
-                type="file"
-                accept="image/*"
-                multiple
                 className="form-control mb-2"
-                onChange={(e) => handleImageUpload(b.id, e.target.files)}
+                placeholder="Collection title"
+                onChange={(e) => updateField(b.id, "title", e.target.value)}
               />
-              <input
-                className="form-control mb-2"
-                placeholder="Gallery caption"
-                onChange={(e) => updateField(b.id, "caption", e.target.value)}
-              />
-              <div className="row g-2 mt-2">
-                {(b.fields.images || []).map((url, idx) => (
-                  <div key={idx} className="col-6 col-md-4">
-                    <img
-                      src={url}
-                      alt=""
-                      className="img-fluid rounded shadow-sm"
-                    />
-                  </div>
-                ))}
-              </div>
+              {(b.fields.snippets || []).map((s, i) => (
+                <div key={i} className="card p-2 mb-2 bg-light border">
+                  <input
+                    className="form-control mb-1"
+                    placeholder="Language"
+                    value={s.language}
+                    onChange={(e) => {
+                      const updated = [...(b.fields.snippets || [])];
+                      updated[i].language = e.target.value;
+                      updateField(b.id, "snippets", updated);
+                    }}
+                  />
+                  <textarea
+                    className="form-control"
+                    rows="3"
+                    placeholder="Code"
+                    value={s.code}
+                    onChange={(e) => {
+                      const updated = [...(b.fields.snippets || [])];
+                      updated[i].code = e.target.value;
+                      updateField(b.id, "snippets", updated);
+                    }}
+                  />
+                </div>
+              ))}
+              <button
+                className="btn btn-outline-primary btn-sm"
+                onClick={() => addSnippet(b.id)}
+              >
+                ➕ Add Snippet
+              </button>
             </>
           )}
         </div>
       ))}
 
-      <button className="btn btn-primary me-2" onClick={addBlock} disabled={uploading}>
+      <button className="btn btn-primary me-2" onClick={addBlock}>
         ➕ Add Block
       </button>
-      <button className="btn btn-success" onClick={saveToServer} disabled={uploading}>
-        💾 Save XML (JSON Format)
+      <button className="btn btn-success" onClick={saveToServer}>
+        💾 Save XML
       </button>
 
       {xmlPreview && (
-        <div className="card p-3 mt-3 bg-dark text-light">
-          <h6>📜 XML Preview</h6>
-          <pre style={{ whiteSpace: "pre-wrap" }}>{xmlPreview}</pre>
+        <div className="mt-4">
+          <h5>📜 XML Preview</h5>
+          <pre className="bg-dark text-light p-3 rounded">{xmlPreview}</pre>
+
+          <h5 className="mt-4">🌐 Rendered HTML Preview</h5>
+          <RenderXMLContent xmlString={xmlPreview} />
         </div>
       )}
     </div>
