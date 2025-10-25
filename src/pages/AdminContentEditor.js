@@ -349,15 +349,7 @@ export default function AdminContentEditor({ topicPath }) {
         💾 Save XML
       </button>
 
-      {xmlPreview && (
-        <div className="mt-4">
-          <h5>📜 XML Preview</h5>
-          <pre className="bg-dark text-light p-3 rounded">{xmlPreview}</pre>
-
-          <h5 className="mt-4">🌐 Rendered HTML Preview</h5>
-          <RenderXMLContent xmlString={xmlPreview} />
-        </div>
-      )}
+      
     </div>
   );
 }

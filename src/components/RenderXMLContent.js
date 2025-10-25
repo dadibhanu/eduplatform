@@ -7,6 +7,7 @@ import "prismjs/components/prism-javascript";
 
 export default function RenderXMLContent({ xmlString }) {
   const [elements, setElements] = useState([]);
+  const [activeTabs, setActiveTabs] = useState({}); // stores active language per code-collection
 
   useEffect(() => {
     if (!xmlString) return;
@@ -17,7 +18,6 @@ export default function RenderXMLContent({ xmlString }) {
       const sectionNode = xmlDoc.getElementsByTagName("section")[0];
       if (!sectionNode) return;
 
-      // Extract the inner CDATA and decode entities
       const innerXMLString = sectionNode.textContent
         .replaceAll("&lt;", "<")
         .replaceAll("&gt;", ">")
@@ -61,7 +61,7 @@ export default function RenderXMLContent({ xmlString }) {
             key={key}
             className={`language-${lang} rounded`}
             style={{
-              background: "#1e1e1e",
+              background: "#0f172a",
               color: "#fff",
               padding: "1rem",
               borderRadius: "10px",
@@ -96,117 +96,61 @@ export default function RenderXMLContent({ xmlString }) {
         );
       }
 
-      case "carousel": {
-        const caption = node.getAttribute("caption") || "";
-        const images = Array.from(node.getElementsByTagName("img"));
-        return (
-          <div key={key} className="carousel-container mb-4">
-            {caption && <h6 className="fw-bold mb-2">{caption}</h6>}
-            <div className="d-flex flex-wrap gap-2 justify-content-center">
-              {images.map((img, i) => {
-                const src = img.textContent.trim();
-                return (
-                  <img
-                    key={i}
-                    src={src}
-                    alt={img.getAttribute("alt") || ""}
-                    className="rounded shadow-sm"
-                    style={{
-                      width: "180px",
-                      height: "120px",
-                      objectFit: "cover",
-                      border: "1px solid #ccc",
-                    }}
-                  />
-                );
-              })}
-            </div>
-          </div>
-        );
-      }
-
-      case "gallery": {
-        const caption = node.getAttribute("caption") || "";
-        const imgs = Array.from(node.getElementsByTagName("img"));
-        return (
-          <div key={key} className="gallery-container mb-4">
-            {caption && <h6 className="fw-bold mb-2">{caption}</h6>}
-            <div className="d-flex flex-wrap gap-2 justify-content-center">
-              {imgs.map((img, i) => {
-                const src = img.textContent.trim();
-                return (
-                  <img
-                    key={i}
-                    src={src}
-                    alt={img.getAttribute("alt") || ""}
-                    className="rounded shadow-sm"
-                    style={{
-                      width: "180px",
-                      height: "120px",
-                      objectFit: "cover",
-                      border: "1px solid #ccc",
-                    }}
-                  />
-                );
-              })}
-            </div>
-          </div>
-        );
-      }
-
-      case "example":
-        return (
-          <div
-            key={key}
-            className="p-3 my-3 bg-light border-start border-success border-3 rounded"
-          >
-            <h6 className="text-success fw-bold mb-1">
-              {node.getAttribute("title")}
-            </h6>
-            <p className="mb-0">{node.textContent}</p>
-          </div>
-        );
-
-      case "note":
-        return (
-          <div
-            key={key}
-            className="p-3 my-3 rounded"
-            style={{
-              background: "#eaf7ff",
-              borderLeft: "4px solid #0d6efd",
-              color: "#055160",
-            }}
-          >
-            💡 {node.textContent}
-          </div>
-        );
-
       case "code-collection": {
         const title = node.getAttribute("title");
         const snippets = Array.from(node.getElementsByTagName("snippet"));
+        const firstLang = snippets[0]?.getAttribute("language") || "plaintext";
+        const activeLang = activeTabs[key] || firstLang;
+
         return (
           <div key={key} className="p-3 my-3 bg-light border rounded">
-            <h5 className="fw-bold mb-3 text-secondary">{title}</h5>
+            {title && <h5 className="fw-bold mb-3 text-secondary">{title}</h5>}
+
+            {/* Tabs */}
+            <div className="flex border-b border-gray-300 mb-3">
+              {snippets.map((s, i) => {
+                const lang = s.getAttribute("language") || "plaintext";
+                return (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      setActiveTabs((prev) => ({ ...prev, [key]: lang }));
+                      setTimeout(() => Prism.highlightAll(), 0);
+                    }}
+                    className={`px-4 py-2 text-sm font-medium border-b-2 transition-all ${
+                      activeLang === lang
+                        ? "border-blue-600 text-blue-600"
+                        : "border-transparent text-gray-500 hover:text-blue-500"
+                    }`}
+                  >
+                    {lang.toUpperCase()}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Active Code Snippet */}
             {snippets.map((s, i) => {
               const lang = s.getAttribute("language") || "plaintext";
+              const isActive = activeLang === lang;
               return (
-                <pre
-                  key={i}
-                  className={`language-${lang}`}
-                  style={{
-                    background: "#1e1e1e",
-                    color: "#fff",
-                    padding: "1rem",
-                    borderRadius: "10px",
-                    overflowX: "auto",
-                    marginBottom: "1rem",
-                  }}
-                >
-                  <code className={`language-${lang}`}>
-                    {s.textContent.trim()}
-                  </code>
-                </pre>
+                <div key={i} className={`${isActive ? "block" : "hidden"}`}>
+                  <pre
+                    className={`language-${lang}`}
+                    style={{
+                      background: "#0f172a",
+                      color: "#fff",
+                      padding: "1rem",
+                      borderRadius: "10px",
+                      overflowX: "auto",
+                      marginBottom: "1rem",
+                    }}
+                  >
+                    <code className={`language-${lang}`}>
+                      {s.textContent.trim()}
+                    </code>
+                  </pre>
+                </div>
               );
             })}
           </div>

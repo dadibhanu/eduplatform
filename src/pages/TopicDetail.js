@@ -8,12 +8,20 @@ import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import ContentEditor from "../components/ContentEditor";
 import "highlight.js/styles/github.css";
 import hljs from "highlight.js";
-import { FaBookOpen, FaEdit, FaListUl, FaPlus, FaHome } from "react-icons/fa";
+import {
+  FaBookOpen,
+  FaEdit,
+  FaListUl,
+  FaPlus,
+  FaHome,
+  FaTrash,
+} from "react-icons/fa";
 
 const TopicDetail = () => {
   const { "*": slugPath } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+
   const isAdmin = user?.role === "admin";
 
   const [data, setData] = useState(null);
@@ -25,7 +33,7 @@ const TopicDetail = () => {
   const [reorderMode, setReorderMode] = useState(false);
   const [existingXml, setExistingXml] = useState("");
   const [blockId, setBlockId] = useState(null);
-
+  const [activeTabs, setActiveTabs] = useState({});
   const [newTopic, setNewTopic] = useState({
     title: "",
     slug: "",
@@ -45,7 +53,9 @@ const TopicDetail = () => {
       const firstBlock = payload.blocks?.[0];
       if (firstBlock) {
         setBlockId(firstBlock.id);
-        const xmlBlock = firstBlock.components?.find((c) => c.type === "xml_block");
+        const xmlBlock = firstBlock.components?.find(
+          (c) => c.type === "xml_block"
+        );
         setExistingXml(xmlBlock?.xml || "");
       } else {
         setExistingXml("");
@@ -66,7 +76,30 @@ const TopicDetail = () => {
     hljs.highlightAll();
   }, [existingXml]);
 
-  // ✅ Full XML Renderer
+  // ✅ Delete content handler
+  const handleDeleteContent = async () => {
+    if (!blockId) {
+      alert("No content block found to delete.");
+      return;
+    }
+
+    if (!window.confirm("Are you sure you want to delete this content block?"))
+      return;
+
+    try {
+      const res = await api.delete(`/content-blocks/${blockId}`);
+      console.log("Delete Response:", res.data);
+      alert("🗑️ Content block deleted successfully!");
+      setExistingXml("");
+      setBlockId(null);
+      await fetchTopicData();
+    } catch (err) {
+      console.error("Delete content failed:", err);
+      alert("❌ Failed to delete content block.");
+    }
+  };
+
+  // ✅ Render XML
   const renderXML = (xmlString) => {
     if (!xmlString) return <p className="text-muted">No content yet.</p>;
 
@@ -74,29 +107,30 @@ const TopicDetail = () => {
       const parser = new DOMParser();
       const xmlDoc = parser.parseFromString(xmlString, "text/xml");
 
-      // Step 1️⃣: Extract CDATA
       let cdata = xmlDoc.querySelector("section")?.textContent || "";
 
-      // Step 2️⃣: Decode HTML entities
       const tempDiv = document.createElement("div");
       tempDiv.innerHTML = cdata;
       let decoded = tempDiv.textContent || tempDiv.innerText || "";
 
-      // Step 3️⃣: Remove <p> wrappers added by Quill
-      decoded = decoded.replaceAll("<p>", "").replaceAll("</p>", "").replaceAll("<br>", "").trim();
+      decoded = decoded
+        .replaceAll("<p>", "")
+        .replaceAll("</p>", "")
+        .replaceAll("<br>", "")
+        .trim();
 
-      // Step 4️⃣: Wrap decoded XML inside a root
       const wrappedXml = `<root>${decoded}</root>`;
       const innerDoc = new DOMParser().parseFromString(wrappedXml, "text/xml");
       const nodes = Array.from(innerDoc.documentElement.childNodes);
 
-      // ✅ Recursive node renderer
+      // Recursive XML renderer
       const renderNode = (node, index) => {
         if (node.nodeType === 3 && !node.textContent.trim()) return null;
         const tag = node.nodeName.toLowerCase();
 
         switch (tag) {
-          case "heading":
+          // 🧩 Heading
+          case "heading": {
             const level = node.getAttribute("level") || "2";
             const HeadingTag = `h${level}`;
             return (
@@ -104,10 +138,13 @@ const TopicDetail = () => {
                 {node.textContent}
               </HeadingTag>
             );
+          }
 
+          // 🧩 Paragraph
           case "paragraph":
             return <p key={index}>{node.textContent}</p>;
 
+          // 🧩 Note
           case "note":
             return (
               <div key={index} className="alert alert-info">
@@ -115,23 +152,37 @@ const TopicDetail = () => {
               </div>
             );
 
-          case "image":
+          // 🧩 Image
+          case "image": {
+            const src = node.textContent.trim();
+            const alt = node.getAttribute("alt") || "Image";
+
             return (
-              <figure key={index} className="my-3 text-center">
+              <figure key={index} className="my-4 text-center">
                 <img
-                  src={node.textContent.trim()}
-                  alt={node.getAttribute("alt") || "Image"}
-                  className="img-fluid rounded shadow-sm"
+                  src={src}
+                  alt={alt}
+                  className="rounded shadow-sm"
+                  style={{
+                    width: "650px",
+                    height: "350px",
+                    objectFit: "cover",
+                    border: "1px solid #ddd",
+                    borderRadius: "10px",
+                    display: "block",
+                    margin: "0 auto",
+                    boxShadow: "0 4px 10px rgba(0,0,0,0.2)",
+                  }}
                 />
-                {node.getAttribute("alt") && (
-                  <figcaption className="text-muted small mt-1">
-                    {node.getAttribute("alt")}
-                  </figcaption>
+                {alt && (
+                  <figcaption className="text-muted small mt-2">{alt}</figcaption>
                 )}
               </figure>
             );
+          }
 
-          case "code":
+          // 🧩 Code Block
+          case "code": {
             const lang = node.getAttribute("language") || "plaintext";
             const codeText = node.textContent.trim();
             return (
@@ -144,46 +195,122 @@ const TopicDetail = () => {
                 />
               </pre>
             );
+          }
 
-          case "carousel":
+          // 🧩 Carousel
+          case "carousel": {
+            const caption = node.getAttribute("caption") || "";
+            const images = Array.from(node.getElementsByTagName("img"));
+            const carouselId = `carousel-${index}`;
+
             return (
-              <div key={index} className="carousel-container mb-4">
-                <h6 className="fw-bold mb-2">{node.getAttribute("caption")}</h6>
-                <div className="d-flex flex-wrap gap-2 justify-content-center">
-                  {Array.from(node.getElementsByTagName("img")).map((img, i) => (
-                    <img
-                      key={i}
-                      src={img.textContent.trim()}
-                      alt=""
-                      className="rounded shadow-sm"
-                      style={{ width: "180px", height: "120px", objectFit: "cover" }}
-                    />
-                  ))}
+              <div key={index} className="carousel-container my-4 text-center">
+                {caption && <h6 className="fw-bold mb-3">{caption}</h6>}
+
+                <div className="d-flex align-items-center justify-content-center gap-3">
+                  {/* Left Button */}
+                  <button
+                    className="btn btn-outline-primary rounded-circle d-flex align-items-center justify-content-center"
+                    type="button"
+                    data-bs-target={`#${carouselId}`}
+                    data-bs-slide="prev"
+                    style={{
+                      width: "45px",
+                      height: "45px",
+                      fontSize: "1.25rem",
+                      flexShrink: 0,
+                    }}
+                  >
+                    ‹
+                  </button>
+
+                  {/* Carousel */}
+                  <div
+                    id={carouselId}
+                    className="carousel slide"
+                    data-bs-ride="carousel"
+                    style={{
+                      maxWidth: "650px",
+                      borderRadius: "12px",
+                      overflow: "hidden",
+                      boxShadow: "0 4px 10px rgba(0,0,0,0.2)",
+                    }}
+                  >
+                    <div className="carousel-inner">
+                      {images.map((img, i) => {
+                        const src = img.textContent.trim();
+                        const alt = img.getAttribute("alt") || `Image ${i + 1}`;
+                        return (
+                          <div
+                            key={i}
+                            className={`carousel-item ${
+                              i === 0 ? "active" : ""
+                            }`}
+                          >
+                            <img
+                              src={src}
+                              className="d-block w-100"
+                              alt={alt}
+                              style={{
+                                width: "100%",
+                                height: "350px",
+                                objectFit: "cover",
+                              }}
+                            />
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Right Button */}
+                  <button
+                    className="btn btn-outline-primary rounded-circle d-flex align-items-center justify-content-center"
+                    type="button"
+                    data-bs-target={`#${carouselId}`}
+                    data-bs-slide="next"
+                    style={{
+                      width: "45px",
+                      height: "45px",
+                      fontSize: "1.25rem",
+                      flexShrink: 0,
+                    }}
+                  >
+                    ›
+                  </button>
                 </div>
               </div>
             );
+          }
 
+          // 🧩 Gallery
           case "gallery":
             return (
               <div key={index} className="gallery mb-4">
                 <h6 className="fw-bold mb-2">{node.getAttribute("caption")}</h6>
                 <div className="row g-2">
-                  {Array.from(node.getElementsByTagName("img")).map((img, i) => (
-                    <div className="col-6 col-md-4" key={i}>
-                      <img
-                        src={img.textContent.trim()}
-                        alt=""
-                        className="img-fluid rounded shadow-sm"
-                      />
-                    </div>
-                  ))}
+                  {Array.from(node.getElementsByTagName("img")).map(
+                    (img, i) => (
+                      <div className="col-6 col-md-4" key={i}>
+                        <img
+                          src={img.textContent.trim()}
+                          alt=""
+                          className="img-fluid rounded shadow-sm"
+                        />
+                      </div>
+                    )
+                  )}
                 </div>
               </div>
             );
 
+          // 🧩 Example
           case "example":
             return (
-              <div key={index} className="border-start border-4 border-success ps-3 mb-3">
+              <div
+                key={index}
+                className="border-start border-4 border-success ps-3 mb-3"
+              >
                 <h6 className="fw-bold text-success">
                   {node.getAttribute("title") || "Example"}
                 </h6>
@@ -191,28 +318,72 @@ const TopicDetail = () => {
               </div>
             );
 
-          case "code-collection":
+          // 🧩 Code Collection
+          case "code-collection": {
+            const title = node.getAttribute("title") || "";
+            const snippets = Array.from(node.getElementsByTagName("snippet"));
+            const firstLang =
+              snippets[0]?.getAttribute("language") || "plaintext";
+            const activeLang = activeTabs[index] || firstLang;
+
             return (
-              <div key={index} className="my-3">
-                <h6 className="fw-bold">{node.getAttribute("title")}</h6>
-                {Array.from(node.getElementsByTagName("snippet")).map((snip, i) => (
-                  <pre key={i} className="code-block">
-                    <code
-                      className={`language-${snip.getAttribute("language") || "plaintext"}`}
-                      dangerouslySetInnerHTML={{
-                        __html: hljs.highlightAuto(snip.textContent.trim()).value,
-                      }}
-                    />
-                  </pre>
-                ))}
+              <div key={index} className="my-4 bg-light border rounded p-3">
+                {title && <h6 className="fw-bold mb-3">{title}</h6>}
+
+                <div className="d-flex border-bottom mb-3">
+                  {snippets.map((snip, i) => {
+                    const langName =
+                      snip.getAttribute("language") || "plaintext";
+                    return (
+                      <button
+                        key={i}
+                        className={`px-3 py-2 border-0 bg-transparent fw-semibold ${
+                          activeLang === langName
+                            ? "text-primary border-bottom border-primary"
+                            : "text-secondary"
+                        }`}
+                        style={{ cursor: "pointer" }}
+                        onClick={() =>
+                          setActiveTabs((prev) => ({
+                            ...prev,
+                            [index]: langName,
+                          }))
+                        }
+                      >
+                        {langName.toUpperCase()}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {snippets.map((snip, i) => {
+                  const langName =
+                    snip.getAttribute("language") || "plaintext";
+                  const codeText = snip.textContent.trim();
+                  if (langName !== activeLang) return null;
+
+                  return (
+                    <pre key={i} className="code-block">
+                      <code
+                        className={`language-${langName}`}
+                        dangerouslySetInnerHTML={{
+                          __html: hljs.highlightAuto(codeText).value,
+                        }}
+                      />
+                    </pre>
+                  );
+                })}
               </div>
             );
+          }
 
           default:
-            // handle nested tags like <p> inside CDATA
-            if (node.childNodes.length > 0) {
-              return <div key={index}>{Array.from(node.childNodes).map(renderNode)}</div>;
-            }
+            if (node.childNodes.length > 0)
+              return (
+                <div key={index}>
+                  {Array.from(node.childNodes).map(renderNode)}
+                </div>
+              );
             return null;
         }
       };
@@ -238,7 +409,8 @@ const TopicDetail = () => {
         components: [{ type: "xml_block", xml: xmlString }],
       };
 
-      if (blockId) await api.put(`/topics/slug/${slugPath}/content/${blockId}`, payload);
+      if (blockId)
+        await api.put(`/topics/slug/${slugPath}/content/${blockId}`, payload);
       else await api.post(`/topics/slug/${slugPath}/content`, payload);
 
       await fetchTopicData();
@@ -264,7 +436,7 @@ const TopicDetail = () => {
   const hasSubtopics = childrenState.length > 0;
   const hasContent = Boolean(existingXml);
 
-  // 🧭 Breadcrumb Navigation
+  // 🧭 Breadcrumbs
   const pathParts = topic.full_path.split("/");
   const breadcrumbs = pathParts.map((part, idx) => ({
     name: part.charAt(0).toUpperCase() + part.slice(1),
@@ -284,9 +456,15 @@ const TopicDetail = () => {
           {breadcrumbs.map((crumb, i) => (
             <li
               key={i}
-              className={`breadcrumb-item ${i === breadcrumbs.length - 1 ? "active" : ""}`}
-              onClick={() => i < breadcrumbs.length - 1 && navigate(`/topic/${crumb.path}`)}
-              style={{ cursor: i < breadcrumbs.length - 1 ? "pointer" : "default" }}
+              className={`breadcrumb-item ${
+                i === breadcrumbs.length - 1 ? "active" : ""
+              }`}
+              onClick={() =>
+                i < breadcrumbs.length - 1 && navigate(`/topic/${crumb.path}`)
+              }
+              style={{
+                cursor: i < breadcrumbs.length - 1 ? "pointer" : "default",
+              }}
             >
               {crumb.name}
             </li>
@@ -302,8 +480,11 @@ const TopicDetail = () => {
 
       {/* 🧰 Admin Controls */}
       {isAdmin && (
-        <div className="d-flex flex-column flex-md-row gap-2 mb-4">
-          <button className="btn btn-primary flex-fill" onClick={() => setShowContentModal(true)}>
+        <div className="d-flex flex-column flex-md-row flex-wrap gap-2 mb-4">
+          <button
+            className="btn btn-primary flex-fill"
+            onClick={() => setShowContentModal(true)}
+          >
             {hasContent ? (
               <>
                 <FaEdit className="me-2" /> Edit Content
@@ -315,15 +496,30 @@ const TopicDetail = () => {
             )}
           </button>
 
-          <button className="btn btn-success flex-fill" onClick={() => setShowSubtopicModal(true)}>
+          {hasContent && (
+            <button
+              className="btn btn-danger flex-fill"
+              onClick={handleDeleteContent}
+            >
+              <FaTrash className="me-2" /> Delete Content
+            </button>
+          )}
+
+          <button
+            className="btn btn-success flex-fill"
+            onClick={() => setShowSubtopicModal(true)}
+          >
             <FaPlus className="me-2" /> Add Subtopic
           </button>
 
           <button
-            className={`btn flex-fill ${reorderMode ? "btn-warning" : "btn-secondary"}`}
+            className={`btn flex-fill ${
+              reorderMode ? "btn-warning" : "btn-secondary"
+            }`}
             onClick={() => setReorderMode((p) => !p)}
           >
-            <FaListUl className="me-2" /> {reorderMode ? "Cancel Reorder" : "Reorder Subtopics"}
+            <FaListUl className="me-2" />{" "}
+            {reorderMode ? "Cancel Reorder" : "Reorder Subtopics"}
           </button>
         </div>
       )}
@@ -352,7 +548,11 @@ const TopicDetail = () => {
                 {(provided) => (
                   <div ref={provided.innerRef} {...provided.droppableProps}>
                     {childrenState.map((ch, idx) => (
-                      <Draggable key={ch.id} draggableId={String(ch.id)} index={idx}>
+                      <Draggable
+                        key={ch.id}
+                        draggableId={String(ch.id)}
+                        index={idx}
+                      >
                         {(providedDr) => (
                           <div
                             ref={providedDr.innerRef}
@@ -397,34 +597,48 @@ const TopicDetail = () => {
           <div className="modal-dialog modal-fullscreen">
             <div className="modal-content p-3">
               <h5>Add Subtopic</h5>
+
               <input
                 className="form-control mb-2"
                 placeholder="Title"
                 value={newTopic.title}
-                onChange={(e) => setNewTopic({ ...newTopic, title: e.target.value })}
+                onChange={(e) =>
+                  setNewTopic({ ...newTopic, title: e.target.value })
+                }
               />
+
               <input
                 className="form-control mb-2"
                 placeholder="Slug"
                 value={newTopic.slug}
-                onChange={(e) => setNewTopic({ ...newTopic, slug: e.target.value })}
+                onChange={(e) =>
+                  setNewTopic({ ...newTopic, slug: e.target.value })
+                }
               />
+
               <textarea
                 className="form-control mb-2"
                 placeholder="Description"
                 value={newTopic.description}
-                onChange={(e) => setNewTopic({ ...newTopic, description: e.target.value })}
+                onChange={(e) =>
+                  setNewTopic({ ...newTopic, description: e.target.value })
+                }
               />
+
               <button
                 className="btn btn-success w-100"
                 onClick={async () => {
-                  await api.post("/topics/add", { parent_id: topic.id, ...newTopic });
+                  await api.post("/topics/add", {
+                    parent_id: topic.id,
+                    ...newTopic,
+                  });
                   fetchTopicData();
                   setShowSubtopicModal(false);
                 }}
               >
                 Save
               </button>
+
               <button
                 className="btn btn-secondary w-100 mt-2"
                 onClick={() => setShowSubtopicModal(false)}
