@@ -1,8 +1,9 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import ReactQuill from "react-quill";
 import "react-quill/dist/quill.snow.css";
+import api from "../api";
 
-// ------------------ 🔧 Custom XML Templates ------------------
+// ------------------ 🔧 XML Templates ------------------
 const xmlTemplates = {
   heading: `<heading level="1">Your Heading Here</heading>\n`,
   paragraph: `<paragraph>Your paragraph content here...</paragraph>\n`,
@@ -30,50 +31,27 @@ const imageHandler = function () {
       const formData = new FormData();
       formData.append("file0", file);
 
-      console.group(`🖼 Uploading: ${file.name}`);
-
       try {
-        const res = await fetch("http://31.97.202.194/api/upload/server", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-          body: formData,
+        const res = await api.post("/upload/server", formData, {
+          headers: { "Content-Type": "multipart/form-data" },
         });
 
-        const rawText = await res.text();
-        console.log("📄 Raw Response:", rawText);
-
-        let data;
-        try {
-          data = JSON.parse(rawText);
-        } catch (err) {
-          console.error("❌ JSON Parse Error:", err);
-          alert("❌ Upload failed: Invalid JSON response.");
-          continue;
-        }
-
-        const urls = (data.files || []).map((f) => f.url);
+        const urls = (res.data.files || []).map((f) => f.url);
         if (!urls.length) {
-          alert("⚠️ Upload succeeded but no URL found in response.");
+          alert("⚠️ Upload succeeded but no URL found.");
           continue;
         }
 
-        // ✅ Insert real XML tag (not escaped)
         const editor = quill;
         const range = editor.getSelection(true);
         const xmlTag = `<image alt="Image description">${urls[0]}</image>\n`;
 
         editor.insertText(range.index, xmlTag, "user");
         editor.setSelection(range.index + xmlTag.length);
-
-        console.log("🧩 Inserted XML tag:", xmlTag);
         alert("✅ Image uploaded & XML tag inserted!");
       } catch (err) {
         console.error("❌ Upload Error:", err);
         alert("❌ Upload failed: " + err.message);
-      } finally {
-        console.groupEnd();
       }
     }
   };
@@ -111,12 +89,34 @@ const formats = [
 ];
 
 // ------------------ 🧩 Main Component ------------------
-export default function ContentEditorXML({ onSave }) {
+export default function ContentEditorXML({
+  topicId,
+  blockId = null,
+  initialXML = "",
+  onSave,
+  onCancel,
+}) {
   const [content, setContent] = useState("");
   const [showXML, setShowXML] = useState(true);
   const quillRef = useRef(null);
 
-  // Insert XML snippet
+  // ------------------ 🧠 Load existing XML ------------------
+  useEffect(() => {
+    if (initialXML) {
+      try {
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(initialXML, "text/xml");
+        const section = xmlDoc.querySelector("section");
+        const cdataText = section ? section.textContent.trim() : initialXML;
+        setContent(cdataText);
+      } catch (err) {
+        console.error("❌ XML Parse Error:", err);
+        setContent(initialXML);
+      }
+    }
+  }, [initialXML]);
+
+  // ------------------ ✨ Insert Snippet ------------------
   const insertSnippet = (snippet) => {
     const editor = quillRef.current.getEditor();
     const range = editor.getSelection(true);
@@ -124,24 +124,62 @@ export default function ContentEditorXML({ onSave }) {
     editor.setSelection(range.index + snippet.length);
   };
 
-  // Convert to full XML
-  const convertToXML = (html) => {
-    return `<?xml version="1.0" encoding="UTF-8"?>\n<content>\n  <section><![CDATA[\n${html.trim()}\n  ]]></section>\n</content>`;
+  // ------------------ 🧾 Convert to XML ------------------
+  const convertToXML = (inner) => {
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<content>\n  <section><![CDATA[\n${inner.trim()}\n  ]]></section>\n</content>`;
   };
 
-  // Save button
-  const handleSave = () => {
+  // ------------------ 💾 Save / Update XML ------------------
+  const handleSave = async () => {
     const xml = convertToXML(content);
-    console.log("📦 Final XML Output:\n", xml);
-    onSave?.(xml);
-    alert("✅ XML content saved!");
+
+    const payload = {
+      topic_id: topicId,
+      block_type: "page",
+      block_order: 0,
+      components: [{ type: "xml_block", xml }],
+      metadata: { tags: ["XML"], estimated_read_time: "10 Min" },
+    };
+
+    try {
+      let res;
+      if (blockId) {
+        // ✅ UPDATE Existing block
+        res = await api.put(`/content-blocks/${blockId}`, payload);
+        alert("✅ XML Content updated successfully!");
+      } else {
+        // ✅ CREATE New block
+        res = await api.post(`/content-blocks/`, payload);
+        alert("✅ XML Content created successfully!");
+      }
+
+      console.log("✅ Server Response:", res.data);
+      onSave?.(xml);
+    } catch (err) {
+      console.error("❌ Save Error:", err);
+      const msg = err.response?.data?.message || err.message;
+      alert("❌ Failed to save content: " + msg);
+    }
   };
 
+  // ------------------ 🧩 UI ------------------
   return (
     <div className="container my-4">
-      <h3>🧠 XML Content Editor (Direct XML Tag Insertion)</h3>
+      <div className="d-flex justify-content-between align-items-center mb-3">
+        <h3>
+          🧠 {blockId ? "Edit XML Content" : "Add New XML Content"}
+        </h3>
+        {onCancel && (
+          <button
+            className="btn btn-outline-secondary btn-sm"
+            onClick={onCancel}
+          >
+            ✖ Close
+          </button>
+        )}
+      </div>
 
-      {/* Toolbar Buttons */}
+      {/* Template Buttons */}
       <div className="mb-3 d-flex flex-wrap gap-2">
         {Object.entries(xmlTemplates).map(([key, value]) => (
           <button
@@ -163,11 +201,11 @@ export default function ContentEditorXML({ onSave }) {
           {showXML ? "Hide XML" : "Show XML"}
         </button>
         <button className="btn btn-success" onClick={handleSave}>
-          💾 Save XML
+          💾 {blockId ? "Update XML" : "Save XML"}
         </button>
       </div>
 
-      {/* Editor + XML Preview */}
+      {/* Editor + Preview */}
       <div className="row">
         <div className={showXML ? "col-md-7" : "col-md-12"}>
           <ReactQuill
@@ -177,15 +215,29 @@ export default function ContentEditorXML({ onSave }) {
             formats={formats}
             value={content}
             onChange={setContent}
-            style={{ minHeight: "400px", background: "#fff" }}
+            style={{
+              minHeight: "400px",
+              fontFamily: "monospace",
+              background: "#fff",
+              borderRadius: "6px",
+            }}
           />
         </div>
 
         {showXML && (
           <div className="col-md-5">
-            <div className="card p-3 bg-dark text-light">
-              <h6>📜 XML Output</h6>
-              <pre style={{ whiteSpace: "pre-wrap" }}>
+            <div
+              className="card p-3 bg-dark text-light"
+              style={{ height: "100%" }}
+            >
+              <h6>📜 XML Preview</h6>
+              <pre
+                style={{
+                  whiteSpace: "pre-wrap",
+                  fontSize: "0.85rem",
+                  lineHeight: "1.3",
+                }}
+              >
                 {convertToXML(content)}
               </pre>
             </div>
